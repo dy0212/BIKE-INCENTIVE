@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+import os
+import time
+import random
 
 from fastapi import APIRouter, Query, Request, HTTPException, Header
 from slowapi import Limiter
@@ -16,6 +19,8 @@ from src.domain.incentives import (
     compute_route_free_minutes,
 )
 from src.domain.models import StationOut, RouteIncentiveOut
+
+# 실데이터 모드로 갈 수도 있게 import는 남겨둠(지금은 LIVE_MODE=mock면 안 씀)
 from src.integrations.tashu_client import fetch_live_status
 
 router = APIRouter(prefix="/api/public", tags=["public"])
@@ -24,31 +29,53 @@ limiter = Limiter(key_func=get_remote_address)
 logger = logging.getLogger(__name__)
 
 
+def mock_bikes(station_id: str, capacity: int) -> int:
+    """
+    대여소별 bikes를 '시간에 따라 조금씩 변하는' 가짜 데이터로 생성.
+    - 같은 station_id는 같은 시점에 항상 같은 값(안정적)
+    - 20초마다 값이 조금씩 바뀜(실시간 느낌)
+    """
+    t = int(time.time() // 20)  # 20초 단위로 패턴 변경
+    rnd = random.Random(hash(station_id) ^ t)
+    return rnd.randint(0, max(0, int(capacity)))
+
+
 @router.get("/stations")
 @limiter.limit(lambda: settings.PUBLIC_RATE_LIMIT)
 async def stations(request: Request):
     """
-    CSV(위치/거치대 등) 기반 station 목록 로드 → 실시간 API로 bikes/capacity 덮어쓰기 →
-    최근 대여/반납(윈도우) + 현재 재고로 점수/보상 계산
+    stations 리스트를 반환.
+    - LIVE_MODE=mock (기본): bikes를 mock으로 생성
+    - LIVE_MODE=real: fetch_live_status()로 실시간 값 덮어쓰기(나중에 붙일 때)
     """
-    # 실시간 현황 가져오기 (실패해도 서비스는 유지되게: 빈 dict 처리)
-    try:
-        live = await fetch_live_status()  # { "S001": {"bikes": 12, "capacity": 20}, ... }
-        if live is None:
+    live_mode = os.getenv("LIVE_MODE", "mock").lower()
+
+    live = {}
+    if live_mode == "real":
+        try:
+            live = await fetch_live_status()
+            if live is None:
+                live = {}
+        except Exception:
+            logger.exception("fetch_live_status failed; falling back to empty live dict")
             live = {}
-    except Exception:
-        logger.exception("fetch_live_status failed")
-        live = {}
 
     out = []
     updated_at = touch_update()
 
     for s in list_stations():
-        # ✅ 실시간 값 덮어쓰기
-        if s.station_id in live:
-            s.bikes = int(live[s.station_id].get("bikes", s.bikes))
-            s.capacity = int(live[s.station_id].get("capacity", s.capacity))
+        # ✅ bikes 채우기: mock 또는 real
+        if live_mode == "mock":
+            s.bikes = mock_bikes(s.station_id, s.capacity)
+        else:
+            # real 모드: 실시간 값 덮어쓰기(매칭 되는 것만)
+            if s.station_id in live:
+                s.bikes = int(live[s.station_id].get("bikes", s.bikes))
+                # capacity는 실시간이 없으면 CSV를 유지하는 게 보통 더 안전
+                if "capacity" in live[s.station_id]:
+                    s.capacity = int(live[s.station_id].get("capacity", s.capacity))
 
+        # 최근 대여/반납 카운트(window)
         rents, returns = get_window_counts(s.station_id)
 
         state = StationState(
@@ -96,32 +123,39 @@ async def route_incentive(
     if not s_from or not s_to:
         raise HTTPException(status_code=404, detail="Station not found")
 
-    # (선택) route 계산도 실시간 재고 기반으로 하려면 덮어쓰기
-    try:
-        live = await fetch_live_status()
-        if live is None:
+    live_mode = os.getenv("LIVE_MODE", "mock").lower()
+
+    # route에서도 stations와 동일한 bikes 기준을 사용(중요)
+    if live_mode == "mock":
+        s_from.bikes = mock_bikes(s_from.station_id, s_from.capacity)
+        s_to.bikes = mock_bikes(s_to.station_id, s_to.capacity)
+    else:
+        try:
+            live = await fetch_live_status()
+            if live is None:
+                live = {}
+        except Exception:
+            logger.exception("fetch_live_status failed (route); using empty live dict")
             live = {}
-    except Exception:
-        logger.exception("fetch_live_status failed (route)")
-        live = {}
 
-    if s_from.station_id in live:
-        s_from.bikes = int(live[s_from.station_id].get("bikes", s_from.bikes))
-        s_from.capacity = int(live[s_from.station_id].get("capacity", s_from.capacity))
-    if s_to.station_id in live:
-        s_to.bikes = int(live[s_to.station_id].get("bikes", s_to.bikes))
-        s_to.capacity = int(live[s_to.station_id].get("capacity", s_to.capacity))
+        if s_from.station_id in live:
+            s_from.bikes = int(live[s_from.station_id].get("bikes", s_from.bikes))
+        if s_to.station_id in live:
+            s_to.bikes = int(live[s_to.station_id].get("bikes", s_to.bikes))
 
+    # 출발 대여소 보상(빌려가기 유도)
     rents_f, returns_f = get_window_counts(s_from.station_id)
     st_f = StationState(s_from.capacity, s_from.bikes, rents_f, returns_f)
     sh_f, co_f = compute_scores(st_f)
     reward_rent_f, _ = compute_station_rewards(sh_f, co_f)
 
+    # 도착 대여소 보상(반납 유도)
     rents_t, returns_t = get_window_counts(s_to.station_id)
     st_t = StationState(s_to.capacity, s_to.bikes, rents_t, returns_t)
     sh_t, co_t = compute_scores(st_t)
     _, reward_return_t = compute_station_rewards(sh_t, co_t)
 
+    # 거리 + 무료분 계산
     dist_km = haversine_km(s_from.lat, s_from.lon, s_to.lat, s_to.lon)
     free_minutes = compute_route_free_minutes(
         dist_km=dist_km,
@@ -143,25 +177,38 @@ async def debug_live(
     x_api_key: str = Header(default="", alias="X-API-Key"),
 ):
     """
-    실시간 연동이 되는지 확인용(관리자 키로 보호)
-    - live가 비어있는지 / station_id 매칭이 되는지 바로 확인 가능
+    연동/매칭 상태 확인용(관리자 키 필요)
+    - LIVE_MODE=mock이면 "mock" 통계
+    - LIVE_MODE=real이면 live_keys/matched 확인
     """
     if x_api_key != settings.ADMIN_API_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
+    live_mode = os.getenv("LIVE_MODE", "mock").lower()
+    stations = list_stations()
+
+    if live_mode == "mock":
+        return {
+            "ok": True,
+            "mode": "mock",
+            "stations": len(stations),
+            "sample_station_ids": [s.station_id for s in stations[:10]],
+        }
+
+    # real 모드
     try:
         live = await fetch_live_status()
         if live is None:
             live = {}
     except Exception as e:
         logger.exception("fetch_live_status failed (debug)")
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "mode": "real", "error": str(e)}
 
-    stations = list_stations()
     matched = sum(1 for s in stations if s.station_id in live)
 
     return {
         "ok": True,
+        "mode": "real",
         "live_keys": len(live),
         "stations": len(stations),
         "matched": matched,
