@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: bike-incentive-web
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -k uvicorn.workers.UvicornWorker app:app
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: ALLOWED_ORIGINS
+        value: https://bike-incentive-web.onrender.com
+      - key: ADMIN_API_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+
+  - type: worker
+    name: bike-incentive-worker
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m src.worker.run
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: ADMIN_API_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false

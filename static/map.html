@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>자전거 인센티브 지도</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <div id="map"></div>
+
+  <div class="panel">
+    <div class="title">인센티브 기반 분산</div>
+    <div class="row">
+      <label><input type="checkbox" id="toggleHeat" /> 히트맵</label>
+    </div>
+    <div class="row small" id="status">loading...</div>
+
+    <hr />
+
+    <div class="row small">대여소 2개를 클릭하면 “이동 인센티브(무료 분)”를 계산합니다.</div>
+    <div class="row small"><b>FROM</b>: <span id="fromId">-</span></div>
+    <div class="row small"><b>TO</b>: <span id="toId">-</span></div>
+    <div class="row" id="routeBox"></div>
+
+    <button id="resetSel" class="btn">선택 초기화</button>
+  </div>
+
+  <script src="/static/js/map.js"></script>
+</body>
+</html>
