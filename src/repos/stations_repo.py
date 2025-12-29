@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import csv
+import datetime
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
-import datetime
 
 
 @dataclass
@@ -18,9 +19,34 @@ class Station:
     region_id: str
 
 
-# ✅ 프로젝트 루트(bike-incentive/) 기준으로 data 파일 찾기
-BASE_DIR = Path(__file__).resolve().parents[2]
-CSV_PATH = BASE_DIR / "data" / "tashu_stations.csv"
+# ===== CSV path resolution (local + Render secret) =====
+BASE_DIR = Path(__file__).resolve().parents[2]  # bike-incentive/
+
+DEFAULT_CSV = BASE_DIR / "data" / "tashu_stations.csv"
+SECRET_CSV = Path("/etc/secrets/tashu_stations.csv")
+
+# Optional override (ex: STATIONS_CSV_PATH=/etc/secrets/tashu_stations.csv)
+CSV_PATH = Path(os.getenv("STATIONS_CSV_PATH", str(DEFAULT_CSV)))
+
+# If local path doesn't exist but Render secret file exists, use it
+if not CSV_PATH.exists() and SECRET_CSV.exists():
+    CSV_PATH = SECRET_CSV
+
+
+def _open_csv() -> tuple[str, object]:
+    """
+    Try common encodings (utf-8-sig first for Excel BOM),
+    fallback to cp949 for Korean Windows CSV exports.
+    Returns (encoding_used, file_object).
+    """
+    last_err: Exception | None = None
+    for enc in ("utf-8-sig", "utf-8", "cp949"):
+        try:
+            f = open(CSV_PATH, encoding=enc, newline="")
+            return enc, f
+        except Exception as e:
+            last_err = e
+    raise last_err  # type: ignore[misc]
 
 
 def _read_csv_stations() -> List[Station]:
@@ -29,28 +55,58 @@ def _read_csv_stations() -> List[Station]:
 
     stations: List[Station] = []
 
-    # ✅ 엑셀 저장 CSV는 종종 utf-8-sig(BOM)라서 이게 안전
-    with open(CSV_PATH, encoding="utf-8-sig", newline="") as f:
+    enc, f = _open_csv()
+    with f:
         reader = csv.DictReader(f)
+
         required = {"station_id", "name", "lat", "lon", "capacity", "region_id"}
         if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
-            raise ValueError(f"CSV header must include: {sorted(required)}. got: {reader.fieldnames}")
+            raise ValueError(
+                f"CSV header must include: {sorted(required)}. got: {reader.fieldnames} (encoding={enc})"
+            )
 
         for row in reader:
-            stations.append(Station(
-                station_id=row["station_id"].strip(),
-                name=row["name"].strip(),
-                lat=float(row["lat"]),
-                lon=float(row["lon"]),
-                capacity=int(float(row["capacity"])) if row["capacity"] else 0,
-                bikes=0,  # 실시간 API로 나중에 덮어쓸 값
-                region_id=row["region_id"].strip() or "R1",
-            ))
+            # Safety: skip duplicated header rows accidentally included as data
+            if row.get("lat", "").strip().lower() == "lat":
+                continue
+
+            station_id = (row.get("station_id") or "").strip()
+            name = (row.get("name") or "").strip()
+
+            if not station_id or not name:
+                # Skip bad/empty rows
+                continue
+
+            lat_str = (row.get("lat") or "").strip()
+            lon_str = (row.get("lon") or "").strip()
+            cap_str = (row.get("capacity") or "").strip()
+            region_id = (row.get("region_id") or "").strip() or "R1"
+
+            try:
+                lat = float(lat_str)
+                lon = float(lon_str)
+            except ValueError as e:
+                raise ValueError(f"Invalid lat/lon for station_id={station_id}: lat='{lat_str}', lon='{lon_str}'") from e
+
+            # capacity can be empty; allow 0
+            capacity = int(float(cap_str)) if cap_str else 0
+
+            stations.append(
+                Station(
+                    station_id=station_id,
+                    name=name,
+                    lat=lat,
+                    lon=lon,
+                    capacity=capacity,
+                    bikes=0,  # live API will overwrite later
+                    region_id=region_id,
+                )
+            )
 
     return stations
 
 
-# 간단 캐시(서버가 /stations를 자주 호출하니까 매번 파일 읽지 않도록)
+# Simple cache to avoid re-reading file on every request
 _STATIONS_CACHE: Optional[List[Station]] = None
 
 
@@ -58,7 +114,8 @@ def list_stations() -> List[Station]:
     global _STATIONS_CACHE
     if _STATIONS_CACHE is None:
         _STATIONS_CACHE = _read_csv_stations()
-    # 객체를 그대로 리턴하면 bikes/capacity를 덮어쓸 때 캐시가 오염될 수 있어서 복사본 리턴
+
+    # Return copies so runtime mutations (live overwrite) won't pollute cache
     return [Station(**s.__dict__) for s in _STATIONS_CACHE]
 
 
