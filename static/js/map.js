@@ -80,7 +80,7 @@ resetBtn.addEventListener('click', clearSelection);
 
 async function fetchRouteIncentive(fromId, toId){
   const q = new URLSearchParams({from_station_id: fromId, to_station_id: toId});
-  const res = await fetch(`/api/public/route_incentive?${q.toString()}`);
+  const res = await fetch(`/api/public/route?${q.toString()}`); // ✅ 여기 route로
   if (!res.ok) throw new Error('route incentive fetch failed');
   return await res.json();
 }
@@ -98,7 +98,7 @@ async function handleStationClick(st){
 
     try{
       const r = await fetchRouteIncentive(selectedFrom, selectedTo);
-      setRouteBox(`거리 ${r.km}km / 무료 ${r.free_minutes}분\n${r.reason}`);
+      setRouteBox(`거리 ${r.distance_km.toFixed(2)}km / 무료 ${r.free_minutes}분`);
     }catch(e){
       setRouteBox('이동 인센티브 조회 실패');
     }
@@ -168,3 +168,4 @@ refresh();
 
 // 15초마다 갱신 (원하면 5~30초로 조절)
 setInterval(refresh, 15000);
+fetch
