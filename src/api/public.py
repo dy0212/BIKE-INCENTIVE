@@ -1,3 +1,4 @@
+# free_minutes
 from __future__ import annotations
 
 import logging
@@ -168,11 +169,7 @@ async def route_incentive(
 
     # 거리 + 무료분 계산
     dist_km = haversine_km(s_from.lat, s_from.lon, s_to.lat, s_to.lon)
-    free_minutes = compute_route_free_minutes(
-        dist_km=dist_km,
-        reward_rent=reward_rent_f,
-        reward_return=reward_return_t,
-    )
+    free_minutes = compute_route_free_minutes(dist_km, reward_rent_f, reward_return_t)
 
     return RouteIncentiveOut(
         from_station_id=s_from.station_id,
