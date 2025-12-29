@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, Request, HTTPException
+import logging
+
+from fastapi import APIRouter, Query, Request, HTTPException, Header
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -14,20 +16,20 @@ from src.domain.incentives import (
     compute_route_free_minutes,
 )
 from src.domain.models import StationOut, RouteIncentiveOut
-
 from src.integrations.tashu_client import fetch_live_status
 
 router = APIRouter(prefix="/api/public", tags=["public"])
 limiter = Limiter(key_func=get_remote_address)
+
+logger = logging.getLogger(__name__)
 
 
 @router.get("/stations")
 @limiter.limit(lambda: settings.PUBLIC_RATE_LIMIT)
 async def stations(request: Request):
     """
-    1) CSV(위치/거치대 등) 기반 station 목록 로드
-    2) 실시간 API로 bikes/capacity 덮어쓰기
-    3) 최근 대여/반납(윈도우) + 현재 재고로 점수/보상 계산
+    CSV(위치/거치대 등) 기반 station 목록 로드 → 실시간 API로 bikes/capacity 덮어쓰기 →
+    최근 대여/반납(윈도우) + 현재 재고로 점수/보상 계산
     """
     # 실시간 현황 가져오기 (실패해도 서비스는 유지되게: 빈 dict 처리)
     try:
@@ -35,6 +37,7 @@ async def stations(request: Request):
         if live is None:
             live = {}
     except Exception:
+        logger.exception("fetch_live_status failed")
         live = {}
 
     out = []
@@ -88,18 +91,18 @@ async def route_incentive(
     """
     지도에서 두 대여소를 선택했을 때 이동 인센티브(무료 분) 계산
     """
-    # station 존재 확인
     s_from = get_station(from_station_id)
     s_to = get_station(to_station_id)
     if not s_from or not s_to:
         raise HTTPException(status_code=404, detail="Station not found")
 
-    # stations와 동일하게 실시간 덮어쓰기 적용(선택)
+    # (선택) route 계산도 실시간 재고 기반으로 하려면 덮어쓰기
     try:
         live = await fetch_live_status()
         if live is None:
             live = {}
     except Exception:
+        logger.exception("fetch_live_status failed (route)")
         live = {}
 
     if s_from.station_id in live:
@@ -109,7 +112,6 @@ async def route_incentive(
         s_to.bikes = int(live[s_to.station_id].get("bikes", s_to.bikes))
         s_to.capacity = int(live[s_to.station_id].get("capacity", s_to.capacity))
 
-    # 두 대여소 점수/보상 계산
     rents_f, returns_f = get_window_counts(s_from.station_id)
     st_f = StationState(s_from.capacity, s_from.bikes, rents_f, returns_f)
     sh_f, co_f = compute_scores(st_f)
@@ -120,7 +122,6 @@ async def route_incentive(
     sh_t, co_t = compute_scores(st_t)
     _, reward_return_t = compute_station_rewards(sh_t, co_t)
 
-    # 거리 + 무료분 계산
     dist_km = haversine_km(s_from.lat, s_from.lon, s_to.lat, s_to.lon)
     free_minutes = compute_route_free_minutes(
         dist_km=dist_km,
@@ -134,3 +135,36 @@ async def route_incentive(
         distance_km=dist_km,
         free_minutes=free_minutes,
     )
+
+
+@router.get("/debug/live")
+async def debug_live(
+    request: Request,
+    x_api_key: str = Header(default="", alias="X-API-Key"),
+):
+    """
+    실시간 연동이 되는지 확인용(관리자 키로 보호)
+    - live가 비어있는지 / station_id 매칭이 되는지 바로 확인 가능
+    """
+    if x_api_key != settings.ADMIN_API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    try:
+        live = await fetch_live_status()
+        if live is None:
+            live = {}
+    except Exception as e:
+        logger.exception("fetch_live_status failed (debug)")
+        return {"ok": False, "error": str(e)}
+
+    stations = list_stations()
+    matched = sum(1 for s in stations if s.station_id in live)
+
+    return {
+        "ok": True,
+        "live_keys": len(live),
+        "stations": len(stations),
+        "matched": matched,
+        "sample_live_keys": list(live.keys())[:10],
+        "sample_station_ids": [s.station_id for s in stations[:10]],
+    }
