@@ -168,4 +168,3 @@ refresh();
 
 // 15초마다 갱신 (원하면 5~30초로 조절)
 setInterval(refresh, 15000);
-fetch
