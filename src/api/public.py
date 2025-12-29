@@ -145,13 +145,23 @@ async def route_incentive(
 
     # 출발 대여소 보상(빌려가기 유도)
     rents_f, returns_f = get_window_counts(s_from.station_id)
-    st_f = StationState(s_from.capacity, s_from.bikes, rents_f, returns_f)
+    st_f = StationState(
+        capacity=s_from.capacity,
+        bikes=s_from.bikes,
+        rent_count_w=rents_f,
+        return_count_w=returns_f,
+    )
     sh_f, co_f = compute_scores(st_f)
     reward_rent_f, _ = compute_station_rewards(sh_f, co_f)
 
     # 도착 대여소 보상(반납 유도)
     rents_t, returns_t = get_window_counts(s_to.station_id)
-    st_t = StationState(s_to.capacity, s_to.bikes, rents_t, returns_t)
+    st_f = StationState(
+        capacity=s_from.capacity,
+        bikes=s_from.bikes,
+        rent_count_w=rents_f,
+        return_count_w=returns_f,
+    )
     sh_t, co_t = compute_scores(st_t)
     _, reward_return_t = compute_station_rewards(sh_t, co_t)
 
