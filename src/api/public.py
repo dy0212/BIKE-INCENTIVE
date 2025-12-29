@@ -156,14 +156,15 @@ async def route_incentive(
 
     # 도착 대여소 보상(반납 유도)
     rents_t, returns_t = get_window_counts(s_to.station_id)
-    st_f = StationState(
-        capacity=s_from.capacity,
-        bikes=s_from.bikes,
-        rent_count_w=rents_f,
-        return_count_w=returns_f,
+    st_t = StationState(
+        capacity=s_to.capacity,
+        bikes=s_to.bikes,
+        rent_count_w=rents_t,
+        return_count_w=returns_t,
     )
     sh_t, co_t = compute_scores(st_t)
     _, reward_return_t = compute_station_rewards(sh_t, co_t)
+
 
     # 거리 + 무료분 계산
     dist_km = haversine_km(s_from.lat, s_from.lon, s_to.lat, s_to.lon)
