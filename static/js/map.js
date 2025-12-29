@@ -80,10 +80,14 @@ resetBtn.addEventListener('click', clearSelection);
 
 async function fetchRouteIncentive(fromId, toId){
   const q = new URLSearchParams({from_station_id: fromId, to_station_id: toId});
-  const res = await fetch(`/api/public/route?${q.toString()}`); // ✅ 여기 route로
-  if (!res.ok) throw new Error('route incentive fetch failed');
-  return await res.json();
+  const res = await fetch(`/api/public/route?${q.toString()}`);
+
+  const text = await res.text();           // ✅ 에러 메시지도 보기 위해
+  if (!res.ok) throw new Error(`${res.status} ${text}`);
+
+  return JSON.parse(text);
 }
+
 
 async function handleStationClick(st){
   if (!selectedFrom){
@@ -158,9 +162,10 @@ async function refresh(){
     const stations = await fetchStations();
     renderStations(stations);
     statusEl.textContent = `대여소 ${stations.length}개 표시 중`;
-  }catch(e){
-    statusEl.textContent = '데이터 로드 실패';
+  } catch(e){
+    setRouteBox(`이동 인센티브 조회 실패: ${e.message}`);
   }
+
 }
 
 clearSelection();
