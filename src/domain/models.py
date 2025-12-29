@@ -28,6 +28,6 @@ class RegionOut(BaseModel):
 class RouteIncentiveOut(BaseModel):
     from_station_id: str
     to_station_id: str
-    km: float
+    distance_km: float
     free_minutes: int
-    reason: str
+    reason: str = ""
