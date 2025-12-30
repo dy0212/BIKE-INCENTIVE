@@ -140,7 +140,7 @@ async def route_incentive(
         if s_to.station_id in live:
             s_to.bikes = int(live[s_to.station_id].get("bikes", s_to.bikes))
 
-    # 출발 대여소: "대여" 인센티브
+    # 출발 대여소 점수 계산
     rents_f, returns_f = get_window_counts(s_from.station_id)
     st_f = StationState(
         capacity=s_from.capacity,
@@ -149,9 +149,8 @@ async def route_incentive(
         return_count_w=returns_f,
     )
     sh_f, co_f = compute_scores(st_f)
-    reward_rent_f, _ = compute_station_rewards(sh_f, co_f)
 
-    # 도착 대여소: "반납" 인센티브
+    # 도착 대여소 점수 계산
     rents_t, returns_t = get_window_counts(s_to.station_id)
     st_t = StationState(
         capacity=s_to.capacity,
@@ -160,26 +159,25 @@ async def route_incentive(
         return_count_w=returns_t,
     )
     sh_t, co_t = compute_scores(st_t)
-    _, reward_return_t = compute_station_rewards(sh_t, co_t)
 
-    # 거리 + 무료분 계산
+    # 거리
     dist_km = haversine_km(s_from.lat, s_from.lon, s_to.lat, s_to.lon)
 
-    result = compute_route_free_minutes(dist_km, reward_rent_f, reward_return_t)
-
-    # ✅ compute_route_free_minutes가 (minutes, reason) 튜플을 줄 수도 있어서 안전 처리
-    if isinstance(result, tuple):
-        free_minutes, reason = result  # type: ignore[misc]
-    else:
-        free_minutes, reason = result, ""
+    # ✅ 여기서 점수로 계산하고 튜플로 받기
+    free_minutes, reason = compute_route_free_minutes(
+        from_congestion_score=co_f,
+        to_shortage_score=sh_t,
+        km=dist_km,
+    )
 
     return RouteIncentiveOut(
         from_station_id=s_from.station_id,
         to_station_id=s_to.station_id,
-        distance_km=float(dist_km),
+        km=float(dist_km),                 # 모델이 km면 이거
         free_minutes=int(free_minutes),
         reason=str(reason),
     )
+
 
 
 @router.get("/debug/live")

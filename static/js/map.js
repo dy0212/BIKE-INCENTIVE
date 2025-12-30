@@ -25,9 +25,9 @@ function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
 function colorFor(st){
   const s = st.shortage_score ?? 0;
   const c = st.congestion_score ?? 0;
-  if (s > c && s > 0.15) return '#2b6cb0';  // shortage: blue
-  if (c > s && c > 0.15) return '#c53030';  // congestion: red
-  return '#2f855a';                          // normal: green
+  if (s > c && s > 0.15) return '#2b6cb0';
+  if (c > s && c > 0.15) return '#c53030';
+  return '#2f855a';
 }
 
 function radiusFor(st){
@@ -64,7 +64,10 @@ function setRouteBox(text){
 
 async function fetchStations(){
   const res = await fetch('/api/public/stations');
-  if (!res.ok) throw new Error('stations fetch failed');
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`${res.status} ${text}`);
+  }
   return await res.json();
 }
 
@@ -82,12 +85,11 @@ async function fetchRouteIncentive(fromId, toId){
   const q = new URLSearchParams({from_station_id: fromId, to_station_id: toId});
   const res = await fetch(`/api/public/route?${q.toString()}`);
 
-  const text = await res.text();           // ✅ 에러 메시지도 보기 위해
+  const text = await res.text();
   if (!res.ok) throw new Error(`${res.status} ${text}`);
 
   return JSON.parse(text);
 }
-
 
 async function handleStationClick(st){
   if (!selectedFrom){
@@ -96,20 +98,25 @@ async function handleStationClick(st){
     setRouteBox('TO 대여소를 선택하세요.');
     return;
   }
+
   if (!selectedTo){
     selectedTo = st.station_id;
     toEl.textContent = selectedTo;
 
     try{
       const r = await fetchRouteIncentive(selectedFrom, selectedTo);
-      setRouteBox(`거리 ${r.distance_km.toFixed(2)}km / 무료 ${r.free_minutes}분`);
+
+      const km = (r.km ?? r.distance_km ?? 0);
+      const free = (r.free_minutes ?? 0);
+      const reason = (r.reason ?? '');
+
+      setRouteBox(`거리 ${Number(km).toFixed(2)}km / 무료 ${free}분\n${reason}`);
     }catch(e){
-      setRouteBox('이동 인센티브 조회 실패');
+      setRouteBox(`이동 인센티브 조회 실패: ${e.message}`);
     }
     return;
   }
 
-  // if already both selected, restart selection with new FROM
   selectedFrom = st.station_id;
   selectedTo = null;
   fromEl.textContent = selectedFrom;
@@ -135,10 +142,8 @@ function renderStations(stations){
 
     marker.bindPopup(popupHtml(st));
     marker.on('click', () => handleStationClick(st));
-
     marker.addTo(markerLayer);
 
-    // heat: use "need" severity (max of shortage/congestion)
     const sev = Math.max(st.shortage_score ?? 0, st.congestion_score ?? 0);
     heatPoints.push([st.lat, st.lon, sev]);
   }
@@ -162,14 +167,11 @@ async function refresh(){
     const stations = await fetchStations();
     renderStations(stations);
     statusEl.textContent = `대여소 ${stations.length}개 표시 중`;
-  } catch(e){
-    setRouteBox(`이동 인센티브 조회 실패: ${e.message}`);
+  }catch(e){
+    statusEl.textContent = `데이터 로드 실패: ${e.message}`;
   }
-
 }
 
 clearSelection();
 refresh();
-
-// 15초마다 갱신 (원하면 5~30초로 조절)
 setInterval(refresh, 15000);

@@ -4,9 +4,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    APP_ENV: str = "development"
+    APP_ENV: str = "unjirohmoohyun"
     ALLOWED_ORIGINS: str = "http://127.0.0.1:8000,http://localhost:8000"
-    ADMIN_API_KEY: str = "dev-admin-key-change-me"
+    ADMIN_API_KEY: str = "ehdduf0625!"
     REDIS_URL: str | None = None
 
     # scoring
