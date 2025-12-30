@@ -173,10 +173,11 @@ async def route_incentive(
     return RouteIncentiveOut(
         from_station_id=s_from.station_id,
         to_station_id=s_to.station_id,
-        km=float(dist_km),                 # 모델이 km면 이거
+        distance_km=float(dist_km),
         free_minutes=int(free_minutes),
         reason=str(reason),
     )
+
 
 
 
