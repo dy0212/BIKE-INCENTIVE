@@ -91,7 +91,14 @@ async function fetchRouteIncentive(fromId, toId){
   return JSON.parse(text);
 }
 
+let lastPickAt = 0;
+
 async function handleStationClick(st){
+  // 1 짧은 시간에 들어온 중복 호출 방지
+  const now = Date.now();
+  if (now - lastPickAt < 250) return;
+  lastPickAt = now;
+
   if (!selectedFrom){
     selectedFrom = st.station_id;
     fromEl.textContent = selectedFrom;
@@ -100,29 +107,35 @@ async function handleStationClick(st){
   }
 
   if (!selectedTo){
+    // 2 FROM을 다시 찍은 경우는 무시하거나 안내
+    if (st.station_id === selectedFrom){
+      setRouteBox('다른 대여소를 TO로 선택하세요.');
+      return;
+    }
+
     selectedTo = st.station_id;
     toEl.textContent = selectedTo;
 
     try{
       const r = await fetchRouteIncentive(selectedFrom, selectedTo);
-
-      const km = (r.km ?? r.distance_km ?? 0);
-      const free = (r.free_minutes ?? 0);
-      const reason = (r.reason ?? '');
-
-      setRouteBox(`거리 ${Number(km).toFixed(2)}km / 무료 ${free}분\n${reason}`);
+      setRouteBox(`거리 ${r.distance_km.toFixed(2)}km / 무료 ${r.free_minutes}분`);
     }catch(e){
-      console.error(e);
-      setRouteBox(`이동 인센티브 조회 실패: ${e.message ?? e}`);
+      setRouteBox(`이동 인센티브 조회 실패: ${e.message}`);
     }
+    return;
   }
 
+  // 3 이미 FROM TO가 다 선택된 상태에서 같은 TO가 또 들어오면 무시
+  if (st.station_id === selectedTo) return;
+
+  // 4 세 번째 클릭으로 재시작하고 싶으면 이 로직 유지
   selectedFrom = st.station_id;
   selectedTo = null;
   fromEl.textContent = selectedFrom;
   toEl.textContent = '-';
   setRouteBox('TO 대여소를 선택하세요.');
 }
+
 
 function renderStations(stations){
   markerLayer.clearLayers();
