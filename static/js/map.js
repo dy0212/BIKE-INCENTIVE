@@ -112,9 +112,9 @@ async function handleStationClick(st){
 
       setRouteBox(`거리 ${Number(km).toFixed(2)}km / 무료 ${free}분\n${reason}`);
     }catch(e){
-      setRouteBox(`이동 인센티브 조회 실패: ${e.message}`);
+      console.error(e);
+      setRouteBox(`이동 인센티브 조회 실패: ${e.message ?? e}`);
     }
-    return;
   }
 
   selectedFrom = st.station_id;
